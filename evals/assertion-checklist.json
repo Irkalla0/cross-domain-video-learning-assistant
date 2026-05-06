@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "assertions": [
+    {
+      "id": "has_evidence_index",
+      "text": "输出包含“证据索引”且结论可追溯到时间戳或文本来源。",
+      "applies_to_eval_ids": [1, 2, 3, 4, 5, 6, 7, 8]
+    },
+    {
+      "id": "has_executable_steps",
+      "text": "输出包含可执行步骤、检查点、失败修正，不只是摘要。",
+      "applies_to_eval_ids": [1, 2, 3, 4, 5, 6, 7, 8]
+    },
+    {
+      "id": "uses_top_comments_when_available",
+      "text": "当提供 top_comments 时，输出包含结构化评论洞察（补充点/争议点/误区）。",
+      "applies_to_eval_ids": [5, 6]
+    },
+    {
+      "id": "has_domain_module",
+      "text": "输出出现并正确填写对应领域附加模块。",
+      "applies_to_eval_ids": [1, 2, 3, 4, 5, 6, 7, 8]
+    },
+    {
+      "id": "handles_login_and_fallback",
+      "text": "登录受限场景体现会话复用检查；字幕缺失时正确走页面可见文本兜底并提示边界。",
+      "applies_to_eval_ids": [7, 8]
+    },
+    {
+      "id": "investment_has_risk_boundary",
+      "text": "投资类输出包含风险边界与非投资建议提示，且不出现个股买卖指令。",
+      "applies_to_eval_ids": [1, 5]
+    }
+  ]
+}
