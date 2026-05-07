@@ -16,6 +16,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -55,6 +56,18 @@ def run_cmd(cmd: List[str], cwd: Path, timeout: int) -> subprocess.CompletedProc
 def ensure_tool(tool: str) -> None:
     if shutil.which(tool) is None:
         raise RuntimeError(f"Required tool not found in PATH: {tool}")
+
+
+def yt_dlp_invocation() -> List[str]:
+    if shutil.which("yt-dlp") is not None:
+        return ["yt-dlp"]
+    try:
+        import yt_dlp  # type: ignore # noqa: F401
+    except Exception as exc:
+        raise RuntimeError(
+            "yt-dlp is required but not found. Install with: py -m pip install --user yt-dlp"
+        ) from exc
+    return [sys.executable, "-m", "yt_dlp"]
 
 
 def make_run_dir(base_output_dir: Path) -> Path:
@@ -143,6 +156,39 @@ def parse_plain_text(path: Path) -> List[Segment]:
     return [Segment(timestamp=f"line-{idx+1}", text=line) for idx, line in enumerate(lines)]
 
 
+def dedupe_lines(lines: List[str]) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if line in seen:
+            continue
+        seen.add(line)
+        out.append(line)
+    return out
+
+
+def extract_comment_lines(lines: List[str]) -> List[str]:
+    start_markers = {"全部评论"}
+    end_markers = {"登录后可查看更多评论", "推荐视频", "广告投放"}
+    in_block = False
+    comment_lines: List[str] = []
+
+    for line in lines:
+        if line in start_markers:
+            in_block = True
+            comment_lines.append(line)
+            continue
+        if not in_block:
+            continue
+        comment_lines.append(line)
+        if line in end_markers:
+            break
+    return comment_lines
+
+
 def language_support_payload(default_sub_langs: str) -> dict:
     return {
         "subtitle_mode": {
@@ -212,7 +258,7 @@ def try_subtitles(
 ) -> tuple[Optional[List[Segment]], Optional[Path], Optional[str], Optional[str]]:
     outtmpl = str(run_dir / "%(id)s.%(ext)s")
     cmd = [
-        "yt-dlp",
+        *yt_dlp_invocation(),
         "--skip-download",
         "--no-playlist",
         "--write-subs",
@@ -258,7 +304,7 @@ def whisper_fallback(
 
     outtmpl = str(run_dir / "audio.%(ext)s")
     dl_cmd = [
-        "yt-dlp",
+        *yt_dlp_invocation(),
         "--no-playlist",
         "-f",
         "bestaudio/best",
@@ -308,6 +354,86 @@ def whisper_fallback(
     return parse_plain_text(txt_path), txt_path
 
 
+def visible_text_fallback(
+    url: str,
+    run_dir: Path,
+    wait_seconds: int,
+    scroll_steps: int,
+    scroll_pixels: int,
+) -> tuple[List[Segment], List[Path], str]:
+    try:
+        from selenium import webdriver
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.edge.options import Options
+    except Exception as exc:
+        raise RuntimeError(
+            "Visible-text fallback requires selenium and Edge WebDriver support. "
+            "Install with: py -m pip install --user selenium. "
+            f"Original import error: {exc}"
+        ) from exc
+
+    opts = Options()
+    opts.add_argument("--headless=new")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--window-size=1600,1200")
+
+    snapshots: List[str] = []
+    final_url = ""
+    title = ""
+
+    with webdriver.Edge(options=opts) as driver:
+        driver.set_page_load_timeout(60)
+        driver.get(url)
+        time.sleep(max(wait_seconds, 1))
+
+        for _ in range(max(scroll_steps, 1)):
+            body_text = driver.find_element(By.TAG_NAME, "body").text
+            snapshots.append(body_text)
+            driver.execute_script(f"window.scrollBy(0, {scroll_pixels});")
+            time.sleep(1.5)
+
+        final_url = driver.current_url
+        title = driver.title or ""
+
+    raw_lines: List[str] = []
+    for snap in snapshots:
+        raw_lines.extend(snap.splitlines())
+    merged_lines = dedupe_lines(raw_lines)
+
+    comment_candidates: List[List[str]] = []
+    for snap in snapshots:
+        snap_lines = [x.strip() for x in snap.splitlines() if x.strip()]
+        comment_block = extract_comment_lines(snap_lines)
+        if comment_block:
+            comment_candidates.append(comment_block)
+
+    if comment_candidates:
+        comment_lines = max(comment_candidates, key=len)
+    else:
+        comment_lines = extract_comment_lines(merged_lines)
+
+    raw_path = run_dir / "visible_page_raw.txt"
+    merged_path = run_dir / "visible_page_merged.txt"
+    comments_path = run_dir / "visible_page_comments.txt"
+
+    raw_path.write_text(
+        "\n\n".join(
+            [f"===== SNAP {i} =====\n{snap}" for i, snap in enumerate(snapshots)]
+        ) + "\n",
+        encoding="utf-8",
+    )
+    merged_path.write_text("\n".join(merged_lines) + "\n", encoding="utf-8")
+    comments_path.write_text("\n".join(comment_lines) + "\n", encoding="utf-8")
+
+    segments = [Segment(timestamp=f"line-{idx+1}", text=line) for idx, line in enumerate(merged_lines)]
+    note = (
+        "Used Selenium visible-page fallback. "
+        f"final_url={final_url}; page_title={title if title else '(empty)'}; "
+        "confidence is lower than subtitle/transcript mode."
+    )
+    return segments, [raw_path, merged_path, comments_path], note
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Extract subtitle/transcript text from video links (Douyin/Bilibili/YouTube/TikTok)."
@@ -344,6 +470,29 @@ def parse_args() -> argparse.Namespace:
         help="If subtitles are unavailable, fallback to whisper transcription.",
     )
     parser.add_argument(
+        "--enable-visible-text-fallback",
+        action="store_true",
+        help="If subtitle/whisper are unavailable, fallback to Selenium visible-page text extraction.",
+    )
+    parser.add_argument(
+        "--visible-fallback-wait-seconds",
+        type=int,
+        default=5,
+        help="Initial wait seconds before capturing visible text (default: 5).",
+    )
+    parser.add_argument(
+        "--visible-fallback-scroll-steps",
+        type=int,
+        default=6,
+        help="How many scroll snapshots to capture in visible fallback (default: 6).",
+    )
+    parser.add_argument(
+        "--visible-fallback-scroll-pixels",
+        type=int,
+        default=900,
+        help="Scroll pixels per step in visible fallback (default: 900).",
+    )
+    parser.add_argument(
         "--whisper-cmd",
         default="whisper",
         help="Whisper command name/path for fallback mode (default: whisper)",
@@ -378,8 +527,6 @@ def main() -> int:
         print(json.dumps({"status": "error", "error": "video_url is required unless --list-language-support is used."}, ensure_ascii=False))
         return 1
 
-    ensure_tool("yt-dlp")
-
     output_dir = Path(args.output_dir).resolve()
     run_dir = make_run_dir(output_dir)
     lang_order = [x.strip() for x in args.langs.split(",") if x.strip()]
@@ -410,40 +557,87 @@ def main() -> int:
             print(json.dumps({"status": "ok", "method": "subtitle", "run_dir": str(run_dir)}, ensure_ascii=False))
             return 0
 
-        if not args.enable_whisper:
+        if args.enable_whisper:
+            whisper_language = args.whisper_language.strip() or None
+            try:
+                w_segments, txt_path = whisper_fallback(
+                    url=args.video_url,
+                    run_dir=run_dir,
+                    auth_args=auth_args,
+                    whisper_cmd=args.whisper_cmd,
+                    whisper_model=args.whisper_model,
+                    whisper_language=whisper_language,
+                    timeout=args.timeout_seconds,
+                )
+                write_outputs(
+                    run_dir=run_dir,
+                    url=args.video_url,
+                    method="whisper",
+                    source_files=[txt_path],
+                    segments=w_segments,
+                    note="Subtitle unavailable; used whisper fallback from downloaded audio.",
+                )
+                print(json.dumps({"status": "ok", "method": "whisper", "run_dir": str(run_dir)}, ensure_ascii=False))
+                return 0
+            except Exception as whisper_exc:
+                if not args.enable_visible_text_fallback:
+                    raise whisper_exc
+
+        if args.enable_visible_text_fallback:
+            v_segments, v_files, v_note = visible_text_fallback(
+                url=args.video_url,
+                run_dir=run_dir,
+                wait_seconds=args.visible_fallback_wait_seconds,
+                scroll_steps=args.visible_fallback_scroll_steps,
+                scroll_pixels=args.visible_fallback_scroll_pixels,
+            )
+            if not v_segments:
+                print(
+                    json.dumps(
+                        {
+                            "status": "error",
+                            "method": "visible_text",
+                            "run_dir": str(run_dir),
+                            "error": "Visible-text fallback produced no text.",
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+                return 1
+
+            write_outputs(
+                run_dir=run_dir,
+                url=args.video_url,
+                method="visible_text",
+                source_files=v_files,
+                segments=v_segments,
+                note=v_note,
+            )
             print(
                 json.dumps(
                     {
-                        "status": "no_subtitle",
-                        "method": "none",
+                        "status": "ok",
+                        "method": "visible_text",
                         "run_dir": str(run_dir),
-                        "hint": "No subtitle track found. Re-run with --enable-whisper for audio transcription.",
+                        "hint": "Used lower-confidence visible page fallback.",
                     },
                     ensure_ascii=False,
                 )
             )
-            return 2
+            return 0
 
-        whisper_language = args.whisper_language.strip() or None
-        w_segments, txt_path = whisper_fallback(
-            url=args.video_url,
-            run_dir=run_dir,
-            auth_args=auth_args,
-            whisper_cmd=args.whisper_cmd,
-            whisper_model=args.whisper_model,
-            whisper_language=whisper_language,
-            timeout=args.timeout_seconds,
+        print(
+            json.dumps(
+                {
+                    "status": "no_subtitle",
+                    "method": "none",
+                    "run_dir": str(run_dir),
+                    "hint": "No subtitle track found. Re-run with --enable-whisper or --enable-visible-text-fallback.",
+                },
+                ensure_ascii=False,
+            )
         )
-        write_outputs(
-            run_dir=run_dir,
-            url=args.video_url,
-            method="whisper",
-            source_files=[txt_path],
-            segments=w_segments,
-            note="Subtitle unavailable; used whisper fallback from downloaded audio.",
-        )
-        print(json.dumps({"status": "ok", "method": "whisper", "run_dir": str(run_dir)}, ensure_ascii=False))
-        return 0
+        return 2
 
     except subprocess.TimeoutExpired:
         print(json.dumps({"status": "error", "error": "Command timed out", "run_dir": str(run_dir)}, ensure_ascii=False))

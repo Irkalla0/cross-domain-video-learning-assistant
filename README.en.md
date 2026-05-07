@@ -22,6 +22,7 @@ py scripts/extract_video_text.py --list-language-support
 - Script: `scripts/extract_video_text.py`
 - Required: `yt-dlp`
 - Optional fallback: `whisper` CLI + `ffmpeg`
+- Optional visible-page fallback: `selenium`
 
 Subtitle-first extraction:
 ```bash
@@ -31,6 +32,11 @@ py scripts/extract_video_text.py "<video_url>" --cookies-from-browser chrome
 Whisper fallback if no subtitles:
 ```bash
 py scripts/extract_video_text.py "<video_url>" --cookies-from-browser chrome --enable-whisper --whisper-model small --whisper-language en
+```
+
+Visible-page fallback if subtitle + whisper both fail:
+```bash
+py scripts/extract_video_text.py "<video_url>" --cookies-from-browser edge --enable-whisper --enable-visible-text-fallback
 ```
 
 Output directory: `transcript_artifacts/run-<timestamp>/`

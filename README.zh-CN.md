@@ -22,6 +22,7 @@ py scripts/extract_video_text.py --list-language-support
 - 脚本：`scripts/extract_video_text.py`
 - 必需依赖：`yt-dlp`
 - 可选依赖（无字幕时）：`whisper` CLI + `ffmpeg`
+- 可选依赖（字幕/听写失败时页面兜底）：`selenium`
 
 常规提取：
 ```bash
@@ -31,6 +32,11 @@ py scripts/extract_video_text.py "<video_url>" --cookies-from-browser chrome
 无字幕时音频转写：
 ```bash
 py scripts/extract_video_text.py "<video_url>" --cookies-from-browser chrome --enable-whisper --whisper-model small --whisper-language zh
+```
+
+字幕 + 听写都失败时，启用页面可见文本兜底：
+```bash
+py scripts/extract_video_text.py "<video_url>" --cookies-from-browser edge --enable-whisper --enable-visible-text-fallback
 ```
 
 输出目录：`transcript_artifacts/run-时间戳/`

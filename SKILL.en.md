@@ -35,6 +35,11 @@ If subtitles are missing, use whisper fallback:
 py scripts/extract_video_text.py "<video_url>" --cookies-from-browser chrome --enable-whisper --whisper-model small
 ```
 
+If subtitle + whisper both fail, enable visible-page fallback (Selenium):
+```bash
+py scripts/extract_video_text.py "<video_url>" --cookies-from-browser chrome --enable-whisper --enable-visible-text-fallback
+```
+
 Check language support:
 ```bash
 py scripts/extract_video_text.py --list-language-support
@@ -69,4 +74,10 @@ py scripts/extract_video_text.py --list-language-support
 ## Claude Code Notes
 - This skill works in Claude Code and Codex-style environments.
 - Use the script first when subtitles are not provided.
+- If Browser Use backend is unavailable, keep going with `--enable-visible-text-fallback` instead of blocking.
 - Keep outputs deterministic with explicit evidence references.
+
+## Optional Skill Chaining
+- `browser-use`: for interactive page navigation when backend is healthy.
+- `transcribe`: for audio-first pipelines when you intentionally prioritize speech recognition.
+- `qa`: to validate report consistency (evidence index completeness, risk boundary presence).

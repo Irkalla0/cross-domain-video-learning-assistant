@@ -64,11 +64,18 @@ python scripts/extract_video_text.py "https://www.youtube.com/watch?v=xxxx" --co
 python scripts/extract_video_text.py "https://www.tiktok.com/@demo/video/xxxx" --cookies-from-browser chrome --enable-whisper --whisper-model small
 ```
 
+如果字幕和音频转写都失败，启用页面可见文本兜底：
+
+```bash
+py scripts/extract_video_text.py "https://www.douyin.com/video/xxxx" --cookies-from-browser edge --enable-whisper --enable-visible-text-fallback
+```
+
 说明：
 - Windows 可将 `python` 替换为 `py`。
 - 仅用于用户授权可访问内容。
 - 登录复用通过 `--cookies-from-browser`（如 `chrome`、`edge`）完成。
 - 若本机未安装 `yt-dlp` 或 `whisper`，先安装后再运行。
+- 页面可见文本兜底依赖 `selenium`（`py -m pip install --user selenium`）。
 - 可用下面命令查看听写语言说明：
 
 ```bash
@@ -83,7 +90,13 @@ py scripts/extract_video_text.py --list-language-support
 ## Claude Code 适配
 - 本技能已适配 Claude Code：优先复用本机登录态 + 先转写后分析。
 - 若用户只给视频链接，先跑 `scripts/extract_video_text.py`，再把 `transcript.txt` 作为 `subtitle_text` 输入分析流程。
+- 若 Browser Use 后端暂不可用，不中断任务，直接启用 `--enable-visible-text-fallback` 继续提取可见文本与评论。
 - 详细操作见 `CLAUDE_CODE.md`。
+
+## 可选 Skill 联动
+- `browser-use`：后端可用时用于交互式页面导航与精细抓取。
+- `transcribe`：需要以语音识别为主时可作为转写增强链路。
+- `qa`：用于交付前检查证据索引完整性、风险边界是否齐全。
 
 ## 登录与访问流程（固定执行）
 1. 先尝试访问 `video_url`，优先复用本机现有登录会话。

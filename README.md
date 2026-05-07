@@ -23,6 +23,12 @@ If subtitle tracks are missing:
 py scripts/extract_video_text.py "<video_url>" --cookies-from-browser chrome --enable-whisper --whisper-model small --whisper-language en
 ```
 
+If subtitle + whisper both fail, use visible-page fallback:
+
+```bash
+py scripts/extract_video_text.py "<video_url>" --cookies-from-browser edge --enable-whisper --enable-visible-text-fallback
+```
+
 Feed `transcript_artifacts/run-*/transcript.txt` into the skill as `subtitle_text`.
 
 ## Why This Project
@@ -30,6 +36,7 @@ Feed `transcript_artifacts/run-*/transcript.txt` into the skill as `subtitle_tex
 Most subtitle tools stop at text dumping. This project goes further:
 - Login-session aware extraction for restricted videos (authorized access only)
 - Cross-platform support: Douyin, Bilibili, YouTube, TikTok
+- Automatic visible-page fallback when transcript pipelines fail
 - Structured learning output: evidence index, action checklist, domain-specific guidance
 - Claude Code-ready workflow with predictable input/output shape
 
@@ -100,12 +107,18 @@ py scripts/extract_video_text.py "<video_url>" --cookies-from-browser chrome
 py scripts/extract_video_text.py "<video_url>" --cookies-from-browser chrome --enable-whisper --whisper-model small --whisper-language zh
 ```
 
-4. 将 `transcript_artifacts/run-*/transcript.txt` 作为 `subtitle_text` 输入 skill
+4. 如果字幕 + whisper 都失败，启用页面可见文本兜底：
+
+```bash
+py scripts/extract_video_text.py "<video_url>" --cookies-from-browser edge --enable-whisper --enable-visible-text-fallback
+```
+
+5. 将 `transcript_artifacts/run-*/transcript.txt` 作为 `subtitle_text` 输入 skill
 
 ### 依赖
 
 - 必需：`yt-dlp`
-- 可选：`whisper` CLI + `ffmpeg`（用于音频转写兜底）
+- 可选：`whisper` CLI + `ffmpeg`（用于音频转写兜底）、`selenium`（用于页面可见文本兜底）
 
 ### Claude Code 适配
 
