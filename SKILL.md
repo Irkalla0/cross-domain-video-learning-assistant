@@ -11,9 +11,10 @@ description: 把抖音/B站/YouTube/TikTok 视频变成“看懂并会用”的�
 ## Quick Start（首次使用）
 1. 收集输入：`video_url` + 字幕文本（推荐）+ 高赞评论（可选）+ `user_goal`（可选）。
 2. 先判定访问条件：尝试复用本机登录会话，确认视频可读。
-3. 按“字幕优先、页面可见文本兜底”提取信息并建立证据链。
-4. 输出固定模板报告：结论、证据、执行清单、领域模块、风险边界、复盘问题。
-5. 如果信息不足，输出缺失项和补充清单，再建议用户补充后复跑。
+3. 若用户未提供字幕，先运行 `scripts/extract_video_text.py` 自动提取字幕/转写。
+4. 按“字幕优先、页面可见文本兜底”提取信息并建立证据链。
+5. 输出固定模板报告：结论、证据、执行清单、领域模块、风险边界、复盘问题。
+6. 如果信息不足，输出缺失项和补充清单，再建议用户补充后复跑。
 
 ## 输入契约
 优先使用下面的输入结构；字段缺失时主动提示补齐。
@@ -36,9 +37,53 @@ description: 把抖音/B站/YouTube/TikTok 视频变成“看懂并会用”的�
 - 选填：`top_comments`、`user_goal`
 
 输入不足处理：
-- 仅有链接无字幕：可继续，但要明确“页面文本兜底，置信度下降”。
+- 仅有链接无字幕：优先运行 `scripts/extract_video_text.py`；若仍失败，再走页面文本兜底并标注置信度下降。
 - 无 `user_goal`：根据视频主题自动推断一个默认学习目标，并在报告开头声明。
 - 有评论但无点赞数据：照样可用，按“观点密度和可验证性”提取洞察。
+
+## 自动转写脚本（新增）
+脚本路径：`scripts/extract_video_text.py`
+
+能力：
+- 优先用 `yt-dlp` 抽取官方/自动字幕（保留时间戳）
+- 无字幕时可选 `--enable-whisper` 从音频转写
+- 输出 `transcript_artifacts/run-时间戳/`，包含：
+  - `transcript.txt`（可直接喂给 `subtitle_text`）
+  - `transcript.md`
+  - `metadata.json`
+
+示例命令：
+
+```bash
+python scripts/extract_video_text.py "https://www.youtube.com/watch?v=xxxx" --cookies-from-browser chrome
+```
+
+字幕缺失时启用音频转写：
+
+```bash
+python scripts/extract_video_text.py "https://www.tiktok.com/@demo/video/xxxx" --cookies-from-browser chrome --enable-whisper --whisper-model small
+```
+
+说明：
+- Windows 可将 `python` 替换为 `py`。
+- 仅用于用户授权可访问内容。
+- 登录复用通过 `--cookies-from-browser`（如 `chrome`、`edge`）完成。
+- 若本机未安装 `yt-dlp` 或 `whisper`，先安装后再运行。
+- 可用下面命令查看听写语言说明：
+
+```bash
+py scripts/extract_video_text.py --list-language-support
+```
+
+## 听写语言说明
+- 字幕抽取层（`yt-dlp`）：支持视频源实际提供的字幕语言。
+- 语音转写层（`whisper`）：支持多语言听写，常见代码包括 `zh`、`en`、`ja`、`ko`、`es`、`fr`、`de`、`ru`、`ar`、`hi`。
+- 可用 `--whisper-language <code>` 指定语言提示；不指定时默认自动识别。
+
+## Claude Code 适配
+- 本技能已适配 Claude Code：优先复用本机登录态 + 先转写后分析。
+- 若用户只给视频链接，先跑 `scripts/extract_video_text.py`，再把 `transcript.txt` 作为 `subtitle_text` 输入分析流程。
+- 详细操作见 `CLAUDE_CODE.md`。
 
 ## 登录与访问流程（固定执行）
 1. 先尝试访问 `video_url`，优先复用本机现有登录会话。
@@ -55,8 +100,9 @@ description: 把抖音/B站/YouTube/TikTok 视频变成“看懂并会用”的�
 
 ## 内容提取优先级（严格遵循）
 1. `subtitle_text` / `subtitle_file`（最高优先）
-2. 视频页面可见文本（字幕缺失时兜底）
-3. 若仍不足以形成可靠分析：输出缺失项和补充清单，不编造内容
+2. `scripts/extract_video_text.py` 产出的 `transcript.txt`
+3. 视频页面可见文本（字幕缺失时兜底）
+4. 若仍不足以形成可靠分析：输出缺失项和补充清单，不编造内容
 
 当使用“页面可见文本兜底”时，明确标注：
 - 信息来源受限
